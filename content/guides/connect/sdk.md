@@ -3,6 +3,52 @@ title: Directus SDK
 description: A JavaScript and TypeScript library that simplifies working with Directus.
 ---
 
+<!-- structured-data -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "TechArticle",
+  "name": "Directus JavaScript SDK Guide",
+  "description": "Learn how to connect to Directus using the JavaScript SDK, including authentication, realtime, GraphQL, custom endpoints, and error handling.",
+  "url": "https://directus.io/docs/guides/connect/sdk",
+  "keywords": "Directus SDK, JavaScript SDK, authentication, GraphQL, realtime, WebSocket, token management",
+  "author": {
+    "@type": "Organization",
+    "name": "Directus"
+  },
+  "breadcrumb": {
+    "@type": "BreadcrumbList",
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "name": "Docs",
+        "item": "https://directus.io/docs"
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
+        "name": "Guides",
+        "item": "https://directus.io/docs/guides"
+      },
+      {
+        "@type": "ListItem",
+        "position": 3,
+        "name": "Connect",
+        "item": "https://directus.io/docs/guides/connect"
+      },
+      {
+        "@type": "ListItem",
+        "position": 4,
+        "name": "SDK",
+        "item": "https://directus.io/docs/guides/connect/sdk"
+      }
+    ]
+  }
+}
+</script>
+
+
 The Directus SDK allows to work with Directus directly in your JavaScript and TypeScript projects. The SDK is split into separate modules, giving granular control over which features to include and which can be pruned at build-time. It is lightweight and dependency-free.
 
 ```bash
@@ -58,6 +104,28 @@ The Directus SDK is a "Composable Client" that allows you to customize and build
   Learn how to create a Schema for SDK client creation.
 ::
 
+### SDK at a Glance
+
+The Directus SDK is a composable client — you build it by combining a base client with one or more composable features. The table below summarises the available composables and when to use each one.
+
+| Composable | Import | Use When |
+|---|---|---|
+| `rest()` | `@directus/sdk` | Making REST API calls |
+| `graphql()` | `@directus/sdk` | Running GraphQL queries |
+| `authentication()` | `@directus/sdk` | Managing login, logout, and token refresh |
+| `realtime()` | `@directus/sdk` | Subscribing to live data over WebSocket |
+| `staticToken(token)` | `@directus/sdk` | Authenticating with a static access token |
+
+You can combine multiple composables in a single client:
+
+```javascript
+import { createDirectus, rest, authentication, realtime } from '@directus/sdk';
+
+const client = createDirectus('https://your-directus-instance.example.com')
+  .with(authentication())
+  .with(rest())
+  .with(realtime());
+```
 
 ## Making Requests
 
@@ -337,6 +405,33 @@ storage.set({
 ```
 ::
 
+#### Custom Storage Example: React Native / Expo (AsyncStorage)
+
+When running the SDK in a React Native environment, `localStorage` is not available. Implement the `AuthStorage` interface using `@react-native-async-storage/async-storage`:
+
+```javascript
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createDirectus, authentication, rest } from '@directus/sdk';
+
+const asyncStorage = {
+  async get(key) {
+    return AsyncStorage.getItem(key);
+  },
+  async set(key, value) {
+    await AsyncStorage.setItem(key, value);
+  },
+  async delete(key) {
+    await AsyncStorage.removeItem(key);
+  },
+};
+
+const client = createDirectus('https://your-directus-instance.example.com')
+  .with(authentication('json', { storage: asyncStorage }))
+  .with(rest());
+```
+
+> **Note:** The `storage` option accepts any object that implements `get`, `set`, and `delete` methods returning `Promise<string | null>`, `Promise<void>`, and `Promise<void>` respectively.
+
 ### Cross-Domain Cookies
 
 A common situation is for the Directus backend and frontend to be hosted on different domains, requiring extra configuration to make sure cookies are passed correctly. Usually this is only required for authentication with cookies but this can be set globally for each composable that does requests. This will then apply to all requests made using that composable:
@@ -430,6 +525,32 @@ const directus = createDirectus('http://directus.example.com');
 
 Polyfill libraries will often register itself to the `globalThis` object. For example, the `react-native-url-polyfill` package.
 
+#### Choosing the Right Polyfill Strategy
+
+The SDK relies on three global APIs — `fetch`, `URL`, and `WebSocket`. The table below maps each API to the recommended Node.js polyfill package and the minimum Node.js version at which a native implementation is available.
+
+| Global API | Recommended Polyfill | Native in Node.js |
+|---|---|---|
+| `fetch` | [`node-fetch`](https://github.com/node-fetch/node-fetch) or [`undici`](https://github.com/nodejs/undici) | ≥ 18 (experimental), ≥ 21 (stable) |
+| `URL` | Built-in `node:url` module | ≥ 10 |
+| `WebSocket` | [`ws`](https://github.com/websockets/ws) | ≥ 22 |
+
+If you are running Node.js 18 or later, you can avoid polyfills entirely by passing the built-in implementations via the `createDirectus` options parameter instead of patching `globalThis`:
+
+```javascript
+import { createDirectus, rest } from '@directus/sdk';
+import { fetch, WebSocket } from 'undici';
+
+const client = createDirectus('https://your-directus-instance.example.com', {
+  globals: {
+    fetch,
+    WebSocket,
+  },
+}).with(rest());
+```
+
+This approach is safer than mutating `globalThis` because it scopes the override to the Directus client only.
+
 ## Error Handling
 
 ### `isDirectusError` type guard
@@ -450,4 +571,103 @@ try {
     // some unknown non API error has been thrown (e.g. unable to parse the JSON response)
   }
 }
+```
+
+### Common SDK Errors
+
+The following table lists frequently encountered errors and their recommended fixes.
+
+| Error | Likely Cause | Fix |
+|---|---|---|
+| `401 Unauthorized` | Missing or expired token | Call `client.login()` or refresh the token with `client.refresh()` |
+| `403 Forbidden` | Insufficient role permissions | Review the role's permissions in the Directus Access Control settings |
+| `404 Not Found` | Incorrect collection name or item ID | Verify the collection name matches exactly (case-sensitive) |
+| `Network Error` / `Failed to fetch` | CORS misconfiguration or wrong URL | Confirm the Directus instance URL and that your origin is allowed in CORS settings |
+| `RECORD_NOT_UNIQUE` | Duplicate value on a unique field | Check for existing records before inserting, or handle the error and surface a user-friendly message |
+| `TOKEN_EXPIRED` | Access token lifetime exceeded | Enable `autoRefresh` in the `authentication()` composable or call `client.refresh()` manually |
+
+#### Catching and Inspecting Errors
+
+Use the `isDirectusError` type guard together with the `DirectusError` type to branch on specific error codes:
+
+```javascript
+import { createDirectus, rest, isDirectusError } from '@directus/sdk';
+import { readItems } from '@directus/sdk';
+
+try {
+  const articles = await client.request(readItems('articles'));
+} catch (error) {
+  if (isDirectusError(error)) {
+    // error.errors is an array of Directus-specific error objects
+    for (const e of error.errors) {
+      console.error(`[${e.extensions.code}] ${e.message}`);
+    }
+  } else {
+    // Non-Directus network or runtime error
+    console.error('Unexpected error:', error);
+  }
+}
+```
+
+## Frequently Asked Questions
+
+### Can I use the SDK in a browser without a bundler?
+
+Yes. The SDK ships an ESM build. You can import it directly in modern browsers using an import map or a CDN such as `esm.sh`:
+
+```html
+<script type="module">
+  import { createDirectus, rest, readItems } from 'https://esm.sh/@directus/sdk';
+
+  const client = createDirectus('https://your-directus-instance.example.com').with(rest());
+  const posts = await client.request(readItems('posts'));
+  console.log(posts);
+</script>
+```
+
+### How do I type my collections in TypeScript?
+
+Define a schema interface and pass it as a generic to `createDirectus`:
+
+```typescript
+import { createDirectus, rest } from '@directus/sdk';
+
+interface Article {
+  id: number;
+  title: string;
+  body: string;
+  published: boolean;
+}
+
+interface Schema {
+  articles: Article[];
+}
+
+const client = createDirectus<Schema>('https://your-directus-instance.example.com').with(rest());
+```
+
+All SDK request helpers (`readItems`, `createItem`, etc.) will now be fully typed against your schema.
+
+### Does the SDK support server-side rendering (SSR)?
+
+Yes. For SSR frameworks such as Next.js or Nuxt, use `staticToken()` for server-side requests where a user session is not required, and pass the user's token explicitly for authenticated server-side calls. Avoid storing tokens in module-level variables to prevent token leakage across requests.
+
+### How do I cancel an in-flight request?
+
+Pass an `AbortSignal` via the `RequestInit` overrides supported by the `rest()` composable:
+
+```javascript
+import { createDirectus, rest, readItems } from '@directus/sdk';
+
+const controller = new AbortController();
+
+const client = createDirectus('https://your-directus-instance.example.com').with(rest());
+
+const promise = client.request(
+  readItems('articles'),
+  { signal: controller.signal }
+);
+
+// Cancel the request after 3 seconds
+setTimeout(() => controller.abort(), 3000);
 ```

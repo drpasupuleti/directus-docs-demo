@@ -19,15 +19,73 @@ The token should be stored and reused by your application, checking if it has ex
 Read more about logging in, refreshing tokens, and logging out.
 ::
 
+```javascript
+// Authenticate and retrieve a short-lived access token + refresh token
+const response = await fetch('https://your-directus-instance.com/auth/login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email: 'user@example.com',
+    password: 's3cr3tP@ssword',
+  }),
+});
+
+const { data } = await response.json();
+const accessToken = data.access_token;   // short-lived (default 15 min)
+const refreshToken = data.refresh_token; // long-lived, store securely
+console.log('Access token:', accessToken);
+```
+
 ### Session Tokens
 
 Session tokens are returned when a user logs in, and combine both an access and refresh token in a single token. They can only be refreshed before they expire, and must be stored as a cookie.
+
+```javascript
+// Request a session token (stored as an HttpOnly cookie by Directus)
+const response = await fetch('https://your-directus-instance.com/auth/login', {
+  method: 'POST',
+  credentials: 'include', // required so the browser stores the session cookie
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email: 'user@example.com',
+    password: 's3cr3tP@ssword',
+    mode: 'session', // instructs Directus to issue a session token via cookie
+  }),
+});
+
+const { data } = await response.json();
+// The session token is automatically set as an HttpOnly cookie — no manual storage needed.
+console.log('Session established:', data);
+```
 
 ### Static Tokens
 
 ![A user profile in the data studio with a newly-generated static token before saving. A notice reads "Make sure to backup and copy the token above. For security reasons, you will not be able to view the token again after saving and navigate off this page."](/img/0df2a7cc-53c8-4f89-acee-476caf877270.webp)
 
 Each user can have one static token that does not expire. This can be generated in the Data Studio within the user page. It is stored in plain text in the `directus_users` collection, and can be manually set via the Data Studio or the [Users API](/api/users).
+
+```bash
+# Use a static token generated in the Directus user settings
+# Pass it as a Bearer token in the Authorization header
+curl https://your-directus-instance.com/items/articles \
+  -H "Authorization: Bearer YOUR_STATIC_TOKEN"
+```
+
+> **Security note:** Static tokens do not expire. Treat them like passwords — rotate them regularly and never commit them to source control. Use environment variables to inject them at runtime.
+
+```javascript
+// Using a static token in a Node.js environment variable
+const STATIC_TOKEN = process.env.DIRECTUS_STATIC_TOKEN;
+
+const response = await fetch('https://your-directus-instance.com/items/articles', {
+  headers: {
+    Authorization: `Bearer ${STATIC_TOKEN}`,
+  },
+});
+
+const { data } = await response.json();
+console.log('Articles:', data);
+```
 
 ### External / Third-Party Tokens
 
@@ -39,6 +97,23 @@ This is useful for enterprise scenarios where you want to maintain a single sour
 Learn how to validate third-party JWTs in Directus.
 ::
 
+```javascript
+// Forward a JWT issued by an external identity provider (e.g. Auth0, Clerk)
+// Directus must be configured to trust the provider's JWKS endpoint.
+const externalJwt = await getTokenFromYourIdentityProvider(); // your IdP SDK call
+
+const response = await fetch('https://your-directus-instance.com/items/articles', {
+  headers: {
+    Authorization: `Bearer ${externalJwt}`,
+  },
+});
+
+const { data } = await response.json();
+console.log('Articles:', data);
+```
+
+> **Prerequisite:** The external provider must be registered under **Settings → Authentication Providers** in your Directus project, and the user's email must match an existing Directus account or auto-provisioning must be enabled.
+
 ## Storing Tokens
 
 ### JSON
@@ -47,11 +122,74 @@ The default response to any Directus API request is via a JSON payload. It is yo
 
 :partial{content="snippet-auth-token"}
 
+```javascript
+// Store tokens in memory (recommended for SPAs — avoids XSS exposure via localStorage)
+let tokenStore = {
+  accessToken: null,
+  refreshToken: null,
+};
+
+async function login(email, password) {
+  const response = await fetch('https://your-directus-instance.com/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  const { data } = await response.json();
+  tokenStore.accessToken = data.access_token;
+  tokenStore.refreshToken = data.refresh_token;
+}
+
+async function refreshAccessToken() {
+  const response = await fetch('https://your-directus-instance.com/auth/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refresh_token: tokenStore.refreshToken, mode: 'json' }),
+  });
+  const { data } = await response.json();
+  tokenStore.accessToken = data.access_token;
+  tokenStore.refreshToken = data.refresh_token;
+}
+```
+
 ### Cookies
 
 A cookie is a method of storing data in the browser. When using the login endpoint, you may set the `mode` to `session` and the Directus response will contain specific headers and the browser will automatically create a `directus_session_token` cookie on your behalf.
 
 When a request is made to the same Directus domain, the cookie will be automatically included in the request until it expires or is overwritten. As a `httpOnly` cookie, client-side JavaScript is unable to access it.
+
+```javascript
+// Login with cookie mode — Directus sets HttpOnly cookies automatically
+async function loginWithCookies(email, password) {
+  await fetch('https://your-directus-instance.com/auth/login', {
+    method: 'POST',
+    credentials: 'include', // send & receive cookies cross-origin
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password, mode: 'cookie' }),
+  });
+  // No token handling needed — the browser manages the cookie.
+}
+
+// Refresh the session using the cookie
+async function refreshCookieSession() {
+  await fetch('https://your-directus-instance.com/auth/refresh', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'cookie' }),
+  });
+}
+
+// Logout and clear the cookie
+async function logout() {
+  await fetch('https://your-directus-instance.com/auth/logout', {
+    method: 'POST',
+    credentials: 'include',
+  });
+}
+```
+
+> **CORS requirement:** For cookie-based auth to work cross-origin, your Directus instance must have the client's origin listed in `CORS_ORIGIN` and `CORS_CREDENTIALS` must be set to `true`.
 
 ## Making Requests
 
@@ -86,3 +224,86 @@ To perform actions that are not available to the public role, a valid token must
     ::
 
 ::
+
+```javascript
+// Helper that attaches the access token and transparently refreshes on 401
+async function directusFetch(url, options = {}, tokenStore) {
+  const makeRequest = (token) =>
+    fetch(url, {
+      ...options,
+      headers: {
+        ...options.headers,
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+  let response = await makeRequest(tokenStore.accessToken);
+
+  if (response.status === 401) {
+    // Attempt a silent token refresh
+    const refreshResponse = await fetch(
+      'https://your-directus-instance.com/auth/refresh',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          refresh_token: tokenStore.refreshToken,
+          mode: 'json',
+        }),
+      }
+    );
+
+    if (!refreshResponse.ok) throw new Error('Session expired — please log in again.');
+
+    const { data } = await refreshResponse.json();
+    tokenStore.accessToken = data.access_token;
+    tokenStore.refreshToken = data.refresh_token;
+
+    // Retry the original request with the new token
+    response = await makeRequest(tokenStore.accessToken);
+  }
+
+  return response.json();
+}
+
+// Example usage
+const articles = await directusFetch(
+  'https://your-directus-instance.com/items/articles',
+  { method: 'GET' },
+  tokenStore
+);
+console.log(articles);
+```
+
+```bash
+# Making an authenticated request with curl
+curl https://your-directus-instance.com/items/articles \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json"
+```
+
+## Troubleshooting
+
+### 401 Unauthorized on every request
+
+- Verify the token has not expired. Access tokens are short-lived (default 15 minutes). Use the `/auth/refresh` endpoint to obtain a new one.
+- Confirm you are sending the token in the `Authorization: Bearer <token>` header, not as a query parameter.
+- For cookie-based auth, ensure `credentials: 'include'` is set on every `fetch` call.
+
+### Cookies not being set in the browser
+
+- Check that `CORS_ORIGIN` in your Directus environment includes your frontend's exact origin (e.g. `http://localhost:3000`).
+- Confirm `CORS_CREDENTIALS=true` is set in your Directus environment.
+- Cookies with `SameSite=None` require `Secure` — ensure your Directus instance is served over HTTPS in production.
+
+### Refresh token rejected (400 / invalid token)
+
+- Refresh tokens are single-use. If you call `/auth/refresh` twice with the same token, the second call will fail.
+- Ensure you are persisting the **new** refresh token returned by each refresh response.
+- Check `REFRESH_TOKEN_TTL` in your Directus environment — the default is 7 days.
+
+### Static token not working
+
+- Static tokens are generated per-user in **User Settings → Token**. Confirm the token belongs to a user with the correct role and permissions.
+- Static tokens are invalidated when a user's password is changed or the token is manually regenerated.

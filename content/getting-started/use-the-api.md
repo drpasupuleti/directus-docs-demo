@@ -5,80 +5,221 @@ navigation:
   title: Use the API
 ---
 
-:video-embed{video-id="4cc18530-ba2a-44f3-bb2e-2bfe4ad024d5"}
-
-This guide will cover interacting with collections in Directus via the REST APIs automatically created on your behalf. You will fetch and create data, and make your first request with the Directus SDK.
-
-:partial{content="quickstart-making-calls"}
+This guide covers interacting with collections in Directus via the REST APIs automatically created on your behalf. You will fetch and create data, filter results with query parameters, and make your first request with the Directus SDK.
 
 ## Before You Start
 
-You will need a Directus project.
-
-:cta-cloud
+You will need a Directus project. If you do not have one, create a free Directus Cloud project or run Directus locally using Docker.
 
 Create a `posts` collection with at least a `title` and `content` field. [Follow the Data Modeling quickstart to learn more](/getting-started/data-model).
 
-You also need an admin static token. In the Data Studio, go to your user detail page. Create a new token, take note of it, and then save.
+You also need an admin static token. In the Data Studio, go to your user detail page. Create a new token, take note of it, and then save. This token is passed in the `Authorization` header of every request.
 
-::callout{icon="material-symbols:menu-book-outline" color="primary" to="/guides/auth/tokens-cookies"}
-Read more about tokens and cookies in Directus Auth.
-::
+> **Further reading:** [Tokens and cookies in Directus Auth](/guides/auth/tokens-cookies)
+
+---
 
 ## Fetching Data
 
+### Basic GET Request
+
 Open your terminal and run the following command to read items from the `posts` collection.
 
-```bash [Terminal]
+```bash
 curl \
---header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
---url 'https://directus.example.com/items/posts'
+  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --url 'https://directus.example.com/items/posts'
 ```
 
-::callout{icon="material-symbols:info-outline"}
-**Replace values**
-- The Base URL (`https://directus.example.com`) must be replaced with your project URL.
-- In the Authorization Header, replace `YOUR_ACCESS_TOKEN` with your admin static token.
-- If you used a different collection, replace `posts` with the name of the collection.
-::
+**Replace the following values before running:**
+- `https://directus.example.com` — your Directus project URL
+- `YOUR_ACCESS_TOKEN` — your admin static token
+- `posts` — the name of your collection, if different
 
-Directus will respond with an array of items. The default limit is 100, so if there are more than 100 items, you must either provide a higher limit or request a second page.
+Directus responds with a JSON envelope containing a `data` array of items:
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "title": "Hello Universe!",
+      "content": "This is my first post."
+    }
+  ]
+}
+```
+
+### Pagination and Limits
+
+The default response limit is **100 items**. If your collection has more than 100 items, use the `limit` and `offset` (or `page`) query parameters to paginate.
+
+```bash
+# Return items 101–200
+curl \
+  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --url 'https://directus.example.com/items/posts?limit=100&offset=100'
+```
+
+```bash
+# Return page 2 (equivalent to offset=100 when limit=100)
+curl \
+  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --url 'https://directus.example.com/items/posts?limit=100&page=2'
+```
+
+To retrieve the total item count alongside results, add `meta=total_count` or `meta=filter_count` to your request.
+
+```bash
+curl \
+  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --url 'https://directus.example.com/items/posts?meta=total_count'
+```
+
+---
 
 ## Using Query Parameters
 
-You can use any of the global query parameters to change the data that is returned by Directus.
+Directus exposes a rich set of global query parameters that control filtering, sorting, field selection, and relational data loading. These work consistently across all collection endpoints.
 
-```bash [Terminal]
+### Filtering and Field Selection
+
+```bash
 curl \
   --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
   --url 'https://directus.example.com/items/posts?filter[status][_eq]=published&fields=id,title'
 ```
 
-This request will only show items with a `status` value of `published`, and only return the `id` and `title` fields.
+This request returns only items where `status` equals `published`, and only includes the `id` and `title` fields in the response. Limiting returned fields reduces payload size and improves performance.
 
-::callout{icon="material-symbols:menu-book-outline" color="primary" to="/guides/connect/query-parameters"}
-See all available query parameters in Directus.
-::
+### Sorting Results
+
+```bash
+curl \
+  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --url 'https://directus.example.com/items/posts?sort=-date_created'
+```
+
+Prefix a field name with `-` to sort descending. Omit the prefix for ascending order.
+
+### Loading Relational Data
+
+If your `posts` collection has a relational field — for example, an `author` field pointing to the `directus_users` collection — you can load nested data using dot notation in the `fields` parameter:
+
+```bash
+curl \
+  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --url 'https://directus.example.com/items/posts?fields=id,title,author.first_name,author.last_name'
+```
+
+> **Further reading:** [All available query parameters in Directus](/guides/connect/query-parameters)
+
+---
 
 ## Creating Data
 
-All collections are given consistent endpoints. By sending a POST request to `/items/posts` with an object containing properties in the collection, a new item will be created.
+### POST a Single Item
 
-```bash [Terminal]
+All collections are given consistent endpoints. Send a `POST` request to `/items/{collection}` with a JSON body containing field values to create a new item.
+
+```bash
 curl \
-	--request POST \
-	--header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
-	--header 'Content-Type: application/json' \
-	--data '{ "title": "Hello Universe!" }' \
-  	--url 'https://directus.example.com/items/posts'
+  --request POST \
+  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --header 'Content-Type: application/json' \
+  --data '{"title": "Hello Universe!", "content": "My first post via the API.", "status": "published"}' \
+  --url 'https://directus.example.com/items/posts'
 ```
+
+Directus returns the newly created item, including its generated `id`:
+
+```json
+{
+  "data": {
+    "id": 2,
+    "title": "Hello Universe!",
+    "content": "My first post via the API.",
+    "status": "published"
+  }
+}
+```
+
+### POST Multiple Items at Once
+
+You can create multiple items in a single request by passing an array instead of an object:
+
+```bash
+curl \
+  --request POST \
+  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --header 'Content-Type: application/json' \
+  --data '[{"title": "Post One"}, {"title": "Post Two"}]' \
+  --url 'https://directus.example.com/items/posts'
+```
+
+---
+
+## Updating and Deleting Data
+
+### PATCH an Item
+
+Send a `PATCH` request to `/items/{collection}/{id}` with only the fields you want to update. Directus performs a partial update — fields not included in the body are left unchanged.
+
+```bash
+curl \
+  --request PATCH \
+  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --header 'Content-Type: application/json' \
+  --data '{"status": "draft"}' \
+  --url 'https://directus.example.com/items/posts/2'
+```
+
+### DELETE an Item
+
+```bash
+curl \
+  --request DELETE \
+  --header 'Authorization: Bearer YOUR_ACCESS_TOKEN' \
+  --url 'https://directus.example.com/items/posts/2'
+```
+
+A successful delete returns an empty `204 No Content` response.
+
+---
 
 ## Next Steps
 
-:video-embed{video-id="0cbf2b23-545e-4ea7-ae45-47707292caec"}
+All endpoints in Directus are documented in the API Reference, which shows expected parameters, payload properties, and examples using the REST API, GraphQL API, and the Directus SDK.
 
-All endpoints in Directus are documented in our API Reference, which also shows all expected parameters and properties in the payload. The API reference shows examples using the REST API, GraphQL API, and the Directus SDK.
+[Explore the Directus API Reference](/api)
 
-::callout{icon="material-symbols:code-blocks-rounded" color="green" to="/api"}
-Explore the Directus API Reference.
-::
+---
+
+## Troubleshooting
+
+### 401 Unauthorized
+
+Your token is missing, malformed, or expired. Confirm the `Authorization: Bearer YOUR_ACCESS_TOKEN` header is present and that the token has not been deleted from the user profile in the Data Studio.
+
+### 403 Forbidden
+
+Your token is valid but the associated user or role does not have permission to read or write the collection. Check the **Permissions** settings for the role in the Data Studio under Settings → Roles & Permissions.
+
+### 404 Not Found
+
+The collection name in the URL does not match any collection in your project. Collection names are case-sensitive. Verify the exact name in the Data Studio under Settings → Data Model.
+
+### Empty `data` Array
+
+If the response returns `{"data": []}` but you expect items, check that:
+- Items have been created in the collection.
+- Your role has read access to the collection.
+- Any `filter` parameters are not unintentionally excluding all results.
+
+### CORS Errors in the Browser
+
+If you are calling the API from a browser-based application and see CORS errors, configure the allowed origins in your Directus project settings under Settings → Project Settings → Security. Requests from `localhost` during development must be explicitly allowed.
+
+### `Content-Type` Errors on POST/PATCH
+
+Always include `--header 'Content-Type: application/json'` when sending a request body. Without it, Directus cannot parse the JSON payload and will return a `400 Bad Request` error.
